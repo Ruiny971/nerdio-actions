@@ -39,14 +39,18 @@ param (
     [Parameter(Position = 0, Mandatory = $false)]
     [System.String[]] $Publishers = @("Citrix", "Citrix Systems, Inc.", "vast limits GmbH"),
 
+   )
     [Parameter(Position = 1, Mandatory = $false)]
-    [System.String[]] $Paths = @("$Env:ProgramFiles\Citrix",
-        "${Env:ProgramFiles(x86)}\Citrix",
-        "${Env:CommonProgramFiles(x86)}\Citrix",
-        "$Env:ProgramData\Citrix",
-        "$Env:ProgramData\deviceTRUST",
-        "$Env:ProgramData\Unidesk")
+    [System.String[]] $Paths = @(
+        "$env:ProgramFiles\Citrix",
+        "$env:ProgramFiles(x86)\Citrix",
+        "$env:CommonProgramFiles\Citrix",
+        "$env:CommonProgramFiles(x86)\Citrix",
+        "$env:ProgramData\Citrix",
+        "$env:ProgramData\deviceTRUST",
+        "$env:ProgramData\Unidesk"
 )
+
 
 begin {
     function Write-LogFile {
