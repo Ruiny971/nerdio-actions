@@ -45,10 +45,15 @@ param (
     [System.Management.Automation.SwitchParameter] $InstallFSLogixAgent,
 
     [Parameter(Mandatory = $false)]
-    [System.String] $TempPath = $(Join-Path -Path $([System.IO.Path]::GetTempPath()) -ChildPath $(New-Guid))
+    [System.String] $TempPath
 )
 
 begin {
+    # Set TempPath at runtime (NME-safe)
+    if (-not $TempPath) {
+        $TempPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ([guid]::NewGuid())
+    }
+
     #region Functions
     function Write-LogFile {
         [CmdletBinding(SupportsShouldProcess = $false)]
