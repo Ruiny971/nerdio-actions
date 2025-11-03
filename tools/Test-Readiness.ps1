@@ -44,14 +44,17 @@ process {
         exit 1
     }
 
-    # Get OS information
-    $Caption = (Get-CimInstance -ClassName "Win32_OperatingSystem").Caption
+    # Get OS SKU
+    $Sku = (Get-CimInstance -ClassName Win32_OperatingSystem).OperatingSystemSKU
+    
+    # Supported SKUs (IDs for allowed OS editions)
+    $SupportedSkus = @(4, 8, 13, 48, 79, 80, 121, 145, 146, 155, 180, 181)
+    
     # Check if OS is supported
-    if ($SupportedVersions -contains $Caption) {
-        Write-Information -MessageData "Windows OS is supported: $Caption."
-    }
-    else {
-        Write-Error -Message "Windows OS is not supported: $Caption."
+    if ($SupportedSkus -contains $Sku) {
+        Write-Information -MessageData "Windows OS SKU is supported: $Sku."
+    } else {
+        Write-Error -Message "Windows OS SKU is not supported: $Sku."
         exit 1
     }
 
