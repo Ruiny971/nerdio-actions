@@ -106,7 +106,7 @@ process {
     $Sku     = [int]$OS.OperatingSystemSKU
     $Edition = $OS.Caption
 
-    Write-Information "Detected OS: $Edition (SKU $Sku)"
+    Write-Host "Detected OS: $Edition (SKU $Sku)"
     Add-Content -Path $LogPath -Value ("{0} - Detected OS: {1} (SKU {2})" -f (Get-Date -Format 'u'), $Edition, $Sku)
 
     $IsSupported = $false
@@ -120,7 +120,7 @@ process {
         $HasErrors = $true
     } else {
         $Message = "Windows OS is supported: $Edition (SKU $Sku)"
-        Write-Information $Message
+        Write-Host $Message
         Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Message)
     }
 
