@@ -1,3 +1,32 @@
+<#
+.SYNOPSIS
+    Validates a Citrix-based or imported VM to ensure it's ready to be converted
+    into an Azure Virtual Desktop (AVD) image.
+
+.DESCRIPTION
+    This script performs three main readiness checks:
+      1. Confirms that the OS architecture is 64-bit.
+      2. Verifies that the OS edition or SKU is supported for AVD.
+      3. Detects conflicting 3rd-party agent services (Citrix, Omnissa, etc.).
+
+    It writes all findings to:
+        C:\Packages\Logs\Test-Readiness.log
+
+    Designed for execution via Nerdio Scripted Actions (CustomScriptExtension),
+    but can also be run locally during manual image validation.
+
+.PARAMETER Publishers
+    List of software publisher patterns to look for when scanning for agent services.
+
+.PARAMETER IgnoreClientApp
+    Excludes Citrix Workspace App or Omnissa Horizon Client services from the check.
+
+.NOTES
+    Exit Codes:
+        0 = All checks passed; image ready for migration.
+        1 = One or more checks failed.
+#>
+
 [CmdletBinding(SupportsShouldProcess = $false)]
 param (
     [Parameter(Position = 0, Mandatory = $false)]
@@ -11,73 +40,113 @@ param (
 )
 
 begin {
-    # Configure the environment
-    $ErrorActionPreference = [System.Management.Automation.ActionPreference]::Stop
-    $InformationPreference = [System.Management.Automation.ActionPreference]::Continue
-    $ProgressPreference = [System.Management.Automation.ActionPreference]::SilentlyContinue
+    # --- Runtime environment setup ---
+    $ErrorActionPreference  = "Stop"
+    $InformationPreference  = "Continue"
+    $ProgressPreference     = "SilentlyContinue"
+    $HasErrors              = $false
 
-    # Services that are part of the Citrix Workspace App or the Omnissa Horizon Client
-    $ClientAppServices = @("CtxAdpPolicy", "CtxPkm", "CWAUpdaterService", "client_service",
-        "ftnlsv3hv", "ftscanmgrhv", "hznsprrdpwks", "omnKsmNotifier", "ws1etlm")
-
-    # Get OS SKU
-    $Sku = (Get-CimInstance -ClassName Win32_OperatingSystem).OperatingSystemSKU
-    
-    # Supported SKUs (IDs for allowed OS editions)
-    $SupportedSkus = @(4, 8, 13, 48, 79, 80, 121, 145, 146, 155, 180, 181)
-    
-    # Check if OS is supported
-    if ($SupportedSkus -contains $Sku) {
-        Write-Information -MessageData "Windows OS SKU is supported: $Sku."
-    } else {
-        Write-Error -Message "Windows OS SKU is not supported: $Sku."
-        exit 1
+    # --- Retrieve Nerdio runtime variables (if available) ---
+    # NME automatically injects $VMName and $ResourceGroupName when running as a Scripted Action.
+    try {
+        if (-not $VMName) { $VMName = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters").Hostname -ErrorAction SilentlyContinue }
+        if (-not $ResourceGroupName) { $ResourceGroupName = (Get-AzVM -Status | Where-Object {$_.Name -eq $VMName}).ResourceGroupName }
+    } catch {
+        $VMName = $env:COMPUTERNAME
+        $ResourceGroupName = "Unknown"
     }
-}
 
-    # Start log
+    # --- Logging configuration ---
     $LogPath = "C:\Packages\Logs\Test-Readiness.log"
     if (!(Test-Path -Path (Split-Path $LogPath))) {
         New-Item -ItemType Directory -Path (Split-Path $LogPath) -Force | Out-Null
     }
     Add-Content -Path $LogPath -Value "=== Test-Readiness run started at $(Get-Date -Format 'u') ==="
+    Add-Content -Path $LogPath -Value "VM: $VMName | Resource Group: $ResourceGroupName"
+
+    # --- Known services part of client-only agents ---
+    $ClientAppServices = @(
+        "CtxAdpPolicy", "CtxPkm", "CWAUpdaterService", "client_service",
+        "ftnlsv3hv", "ftscanmgrhv", "hznsprrdpwks", "omnKsmNotifier", "ws1etlm"
+    )
+
+    # --- Supported SKUs ---
+    $SupportedSkus = @(4, 8, 13, 79, 80, 121, 145, 146, 155, 180, 181)
+
+    # --- Supported Edition keywords (for localized builds) ---
+    $SupportedEditions = @(
+        "Enterprise", "Enterprise N", "Enterprise multi-session",
+        "Windows Server 2016", "Windows Server 2019", "Windows Server 2022", "Windows Server 2025"
+    )
+}
 
 process {
-    # Check if OS is 64-bit
+    # --- 1️⃣ OS Architecture Validation ---
     if ($Env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
-        Write-Error -Message "Windows OS is not 64-bit."
-        exit 1
+        $Message = "Windows OS is not 64-bit."
+        Write-Error $Message
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        $HasErrors = $true
     }
 
-    # Get OS SKU
-    $Sku = (Get-CimInstance -ClassName Win32_OperatingSystem).OperatingSystemSKU
-    
-    # Supported SKUs (IDs for allowed OS editions)
-    $SupportedSkus = @(4, 8, 13, 48, 79, 80, 121, 145, 146, 155, 180, 181)
-    
-    # Check if OS is supported
-    if ($SupportedSkus -contains $Sku) {
-        Write-Information -MessageData "Windows OS SKU is supported: $Sku."
+    # --- 2️⃣ OS SKU and Edition Check ---
+    $OS      = Get-CimInstance Win32_OperatingSystem
+    $Sku     = [int]$OS.OperatingSystemSKU
+    $Edition = $OS.Caption
+
+    Write-Information "Detected OS: $Edition (SKU $Sku)"
+    Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - Detected OS: $Edition (SKU $Sku)"
+
+    $IsSupported = $false
+    if ($SupportedSkus -contains $Sku) { $IsSupported = $true }
+    elseif ($SupportedEditions | ForEach-Object { $Edition -match $_ }) { $IsSupported = $true }
+
+    if (-not $IsSupported) {
+        $Message = "OS validation failed. Unsupported edition: $Edition (SKU $Sku)"
+        Write-Error $Message
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        $HasErrors = $true
     } else {
-        Write-Error -Message "Windows OS SKU is not supported: $Sku."
-        exit 1
+        $Message = "Windows OS is supported: $Edition (SKU $Sku)"
+        Write-Information $Message
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
     }
 
-    # Check if any of the specified 3rd party agents are installed by looking for their services
-    $Services = Get-Service -DisplayName $Publishers
+    # --- 3️⃣ Check for conflicting 3rd-party services ---
+    try {
+        $AllServices = Get-Service -ErrorAction SilentlyContinue
+        $Services = foreach ($Pattern in $Publishers) {
+            $AllServices | Where-Object { $_.DisplayName -like $Pattern }
+        }
+    } catch {
+        $Services = @()
+    }
 
-    # Filter out Citrix Workspace App services or the Omnissa Horizon Client if requested
     if ($IgnoreClientApp) {
         $Services = $Services | Where-Object { $_.Name -notin $ClientAppServices }
     }
 
-    # If no services are found, return 0; otherwise, return 1
     if ($Services.Count -ge 1) {
-        Write-Error -Message "Conflicting 3rd party agents found: $($Services.DisplayName -join ', ')."
-        exit 1
+        $Message = "Conflicting 3rd-party agents found: $($Services.DisplayName -join ', ')."
+        Write-Error $Message
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        $HasErrors = $true
+    } else {
+        $Message = "No conflicting 3rd-party agents found."
+        Write-Information $Message
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
     }
-    else {
-        Write-Information -MessageData "No conflicting 3rd party agents found."
+
+    # --- 4️⃣ Final Decision and Exit Code ---
+    if ($HasErrors) {
+        $Summary = "Readiness check failed — see previous messages or log file for details."
+        Write-Error $Summary
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Summary"
+        exit 1
+    } else {
+        $Summary = "Readiness check completed successfully — system is ready for conversion."
+        Write-Information $Summary
+        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Summary"
         exit 0
     }
 }
