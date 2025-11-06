@@ -47,7 +47,6 @@ begin {
     $HasErrors              = $false
 
     # --- Retrieve Nerdio runtime variables (if available) ---
-    # Safely attempts to detect the VM and Resource Group even if variables aren't passed by Nerdio
     try {
         if (-not $VMName) {
             try {
@@ -98,7 +97,7 @@ process {
     if ($Env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
         $Message = "Windows OS is not 64-bit."
         Write-Error $Message
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Message)
         $HasErrors = $true
     }
 
@@ -108,7 +107,7 @@ process {
     $Edition = $OS.Caption
 
     Write-Information "Detected OS: $Edition (SKU $Sku)"
-    Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - Detected OS: $Edition (SKU $Sku)"
+    Add-Content -Path $LogPath -Value ("{0} - Detected OS: {1} (SKU {2})" -f (Get-Date -Format 'u'), $Edition, $Sku)
 
     $IsSupported = $false
     if ($SupportedSkus -contains $Sku) { $IsSupported = $true }
@@ -117,12 +116,12 @@ process {
     if (-not $IsSupported) {
         $Message = "OS validation failed. Unsupported edition: $Edition (SKU $Sku)"
         Write-Error $Message
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Message)
         $HasErrors = $true
     } else {
         $Message = "Windows OS is supported: $Edition (SKU $Sku)"
         Write-Information $Message
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Message)
     }
 
     # --- 3️⃣ Check for conflicting 3rd-party services ---
@@ -142,24 +141,25 @@ process {
     if ($Services.Count -ge 1) {
         $Message = "Conflicting 3rd-party agents found: $($Services.DisplayName -join ', ')."
         Write-Error $Message
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Message)
         $HasErrors = $true
     } else {
         $Message = "No conflicting 3rd-party agents found."
         Write-Information $Message
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Message"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Message)
     }
 
     # --- 4️⃣ Final Decision and Exit Code ---
     if ($HasErrors) {
-        $Summary = "Readiness check failed — see previous messages or log file for details."
+        $Summary = "Readiness check failed - see previous messages or log file for details."
         Write-Error $Summary
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Summary"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Summary)
         exit 1
-    } else {
+    }
+    else {
         $Summary = "Readiness check completed successfully - system is ready for conversion."
         Write-Information $Summary
-        Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Summary"
+        Add-Content -Path $LogPath -Value ("{0} - {1}" -f (Get-Date -Format 'u'), $Summary)
         exit 0
     }
 }
