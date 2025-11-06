@@ -157,7 +157,7 @@ process {
         Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Summary"
         exit 1
     } else {
-        $Summary = "Readiness check completed successfully — system is ready for conversion."
+        $Summary = "Readiness check completed successfully - system is ready for conversion."
         Write-Information $Summary
         Add-Content -Path $LogPath -Value "$(Get-Date -Format 'u') - $Summary"
         exit 0
