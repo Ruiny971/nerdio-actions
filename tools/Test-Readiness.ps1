@@ -20,22 +20,27 @@ begin {
     $ClientAppServices = @("CtxAdpPolicy", "CtxPkm", "CWAUpdaterService", "client_service",
         "ftnlsv3hv", "ftscanmgrhv", "hznsprrdpwks", "omnKsmNotifier", "ws1etlm")
 
-    # Supported Windows versions
-    $SupportedVersions = @(
-        "Microsoft Windows 11 Enterprise",
-        "Microsoft Windows 11 Enterprise multi-session",
-        "Microsoft Windows 10 Enterprise",
-        "Microsoft Windows 10 Enterprise multi-session",
-        "Microsoft Windows Server 2025 Datacenter",
-        "Microsoft Windows Server 2025 Standard",
-        "Microsoft Windows Server 2022 Datacenter",
-        "Microsoft Windows Server 2022 Standard",
-        "Microsoft Windows Server 2019 Datacenter",
-        "Microsoft Windows Server 2019 Standard",
-        "Microsoft Windows Server 2016 Datacenter",
-        "Microsoft Windows Server 2016 Standard"
-    )
+    # Get OS SKU
+    $Sku = (Get-CimInstance -ClassName Win32_OperatingSystem).OperatingSystemSKU
+    
+    # Supported SKUs (IDs for allowed OS editions)
+    $SupportedSkus = @(4, 8, 13, 48, 79, 80, 121, 145, 146, 155, 180, 181)
+    
+    # Check if OS is supported
+    if ($SupportedSkus -contains $Sku) {
+        Write-Information -MessageData "Windows OS SKU is supported: $Sku."
+    } else {
+        Write-Error -Message "Windows OS SKU is not supported: $Sku."
+        exit 1
+    }
 }
+
+    # Start log
+    $LogPath = "C:\Packages\Logs\Test-Readiness.log"
+    if (!(Test-Path -Path (Split-Path $LogPath))) {
+        New-Item -ItemType Directory -Path (Split-Path $LogPath) -Force | Out-Null
+    }
+    Add-Content -Path $LogPath -Value "=== Test-Readiness run started at $(Get-Date -Format 'u') ==="
 
 process {
     # Check if OS is 64-bit
