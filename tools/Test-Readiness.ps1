@@ -47,10 +47,23 @@ begin {
     $HasErrors              = $false
 
     # --- Retrieve Nerdio runtime variables (if available) ---
-    # NME automatically injects $VMName and $ResourceGroupName when running as a Scripted Action.
+    # Safely attempts to detect the VM and Resource Group even if variables aren't passed by Nerdio
     try {
-        if (-not $VMName) { $VMName = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters").Hostname -ErrorAction SilentlyContinue }
-        if (-not $ResourceGroupName) { $ResourceGroupName = (Get-AzVM -Status | Where-Object {$_.Name -eq $VMName}).ResourceGroupName }
+        if (-not $VMName) {
+            try {
+                $VMParams = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest\Parameters" -ErrorAction SilentlyContinue
+                $VMName = $VMParams.Hostname
+            } catch {
+                $VMName = $env:COMPUTERNAME
+            }
+        }
+
+        if (-not $ResourceGroupName -and (Get-Command Get-AzVM -ErrorAction SilentlyContinue)) {
+            $VMObject = Get-AzVM -Status -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $VMName }
+            $ResourceGroupName = if ($VMObject) { $VMObject.ResourceGroupName } else { "Unknown" }
+        } else {
+            $ResourceGroupName = "Unknown"
+        }
     } catch {
         $VMName = $env:COMPUTERNAME
         $ResourceGroupName = "Unknown"
