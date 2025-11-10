@@ -1,83 +1,108 @@
 [CmdletBinding(SupportsShouldProcess = $false)]
 param (
     [Parameter(Position = 0, Mandatory = $false)]
-    [System.String[]] $Publishers = @("Citrix*", "uberAgent*", "UniDesk*", "Omnissa*"),
+    [string[]] $Publishers = @("Citrix*", "uberAgent*", "UniDesk*", "Omnissa*"),
 
     [Parameter(Mandatory = $false)]
-    [System.Management.Automation.SwitchParameter] $IgnoreClientApp,
-
-    [Parameter(Mandatory = $false)]
-    [System.Management.Automation.SwitchParameter] $IgnoreOmnissaHorizonClient
+    [switch] $IgnoreClientApp
 )
 
 begin {
-    # Configure environment
-    $ErrorActionPreference = "Stop"
-    $InformationPreference = "Continue"
-    $ProgressPreference = "SilentlyContinue"
+    # Configure environment and log file
+    $ErrorActionPreference = 'Stop'
+    $InformationPreference = 'Continue'
+    $ProgressPreference = 'SilentlyContinue'
+    $LogPath = "C:\Packages\Logs\Test-Readiness.log"
+    $LogMessages = @()
+    $Failures = @()
 
-    # Services from Citrix / Horizon client components
+    # Ensure log folder exists
+    $logDir = Split-Path -Path $LogPath -Parent
+    if (!(Test-Path -Path $logDir)) {
+        New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+    }
+
+    # List Citrix Workspace App and Omnissa Horizon Client services for exclusion
     $ClientAppServices = @(
         "CtxAdpPolicy", "CtxPkm", "CWAUpdaterService", "client_service",
         "ftnlsv3hv", "ftscanmgrhv", "hznsprrdpwks", "omnKsmNotifier", "ws1etlm"
     )
 
-    # Supported SKUs (modern mapping for Windows 10/11 & Server)
-    $SupportedSkus = @(4, 8, 13, 48, 79, 80, 83, 121, 125, 145, 146, 147, 155, 156, 157, 180, 181, 188)
-
-    # Edition name fallback (in case SKU mapping changes in future builds)
-    $SupportedEditions = @(
-        "Enterprise", "Enterprise N", "Enterprise multi-session",
-        "Windows Server 2016", "Windows Server 2019", "Windows Server 2022", "Windows Server 2025"
-    )
+    # Supported Windows SKUs: Enterprise, multi-session, Server 2016–2025
+    $SupportedSkus = 4,8,13,48,79,80,121,145,146,155,180,181
 }
 
 process {
-    # Check if OS is 64-bit
+    # 1) Architecture check
     if ($Env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
-        Write-Error "Windows OS is not 64-bit."
-        exit 1
+        $Failures += "Windows OS is not 64-bit."
     }
 
-    # Gather OS info
-    $OS = Get-CimInstance Win32_OperatingSystem
-    $Sku = [int]$OS.OperatingSystemSKU
-    $Edition = $OS.Caption
-
-    Write-Information "Detected OS: $Edition (SKU $Sku)"
-
-    # Determine if supported (by SKU or Caption)
-    $IsSupported = $false
-    if ($SupportedSkus -contains $Sku) { $IsSupported = $true }
-    elseif ($SupportedEditions | ForEach-Object { $Edition -match $_ }) { $IsSupported = $true }
-
-    if (-not $IsSupported) {
-        Write-Error "Windows OS is not supported: $Edition (SKU $Sku)"
-        exit 1
-    } else {
-        Write-Information "Windows OS is supported: $Edition (SKU $Sku)"
-    }
-
-    # Detect conflicting 3rd-party agents
+    # 2) OS SKU check (language-agnostic)
     try {
-        $Services = Get-Service -ErrorAction SilentlyContinue | Where-Object {
-            $Publishers | ForEach-Object { $_Pattern = $_; $_.DisplayName -like $_Pattern }
-        }
+        $OS = Get-CimInstance -ClassName Win32_OperatingSystem
+        $Sku = [int]$OS.OperatingSystemSKU
+        $Caption = $OS.Caption
     } catch {
-        $Services = @()
+        $Failures += "Unable to query OS SKU information."
+        $Sku = $null
+        $Caption = "Unknown"
     }
 
-    # Filter out client app services if requested
-    if ($IgnoreClientApp) {
-        $Services = $Services | Where-Object { $_.Name -notin $ClientAppServices }
+    if ($Sku -ne $null -and ($SupportedSkus -contains $Sku)) {
+        $msg = "Windows OS SKU is supported: $Sku ($Caption)"
+        Write-Information -MessageData $msg
+        $LogMessages += $msg
+    } else {
+        $msg = "Windows OS SKU is not supported: $Sku ($Caption)"
+        $Failures += $msg
+        $LogMessages += $msg
     }
 
-    # Check for conflicts
-    if ($Services.Count -ge 1) {
-        Write-Error "Conflicting 3rd-party agents found: $($Services.DisplayName -join ', ')."
+    # 3) Third-party agent service detection with wildcard matching on Name and DisplayName
+    $AllServices = Get-Service -ErrorAction SilentlyContinue
+    $MatchedServices = @()
+
+    foreach ($Pattern in $Publishers) {
+        $MatchedServices += $AllServices | Where-Object {
+            $_.DisplayName -like $Pattern -or $_.Name -like $Pattern
+        }
+    }
+
+    # De-duplicate by Service Name
+    if ($MatchedServices) {
+        $MatchedServices = $MatchedServices | Sort-Object Name -Unique
+    }
+
+    if ($IgnoreClientApp -and $MatchedServices) {
+        $MatchedServices = $MatchedServices | Where-Object { $ClientAppServices -notcontains $_.Name }
+    }
+
+    if ($MatchedServices -and $MatchedServices.Count -gt 0) {
+        $displayNames = $MatchedServices | ForEach-Object { $_.DisplayName }
+        $msg = "Conflicting 3rd-party agents found: $($displayNames -join ', ')."
+        $Failures += $msg
+        $LogMessages += $msg
+    } else {
+        $msg = "No conflicting 3rd-party agents found."
+        Write-Information -MessageData $msg
+        $LogMessages += $msg
+    }
+
+    # 4) Summary output and log writing
+    if ($Failures.Count -gt 0) {
+        foreach ($fail in $Failures) {
+            Write-Error -Message $fail
+        }
+        $msg = "Readiness check failed with $($Failures.Count) issue(s)."
+        $LogMessages += $msg
+        Set-Content -Path $LogPath -Value ($LogMessages -join "`r`n")
         exit 1
     } else {
-        Write-Information "No conflicting 3rd-party agents found."
+        $msg = "All checks passed successfully."
+        Write-Information -MessageData $msg
+        $LogMessages += $msg
+        Set-Content -Path $LogPath -Value ($LogMessages -join "`r`n")
         exit 0
     }
 }
