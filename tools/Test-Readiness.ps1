@@ -15,9 +15,7 @@ $logFile = "C:\Packages\Logs\Test-Readiness.log"
 function Write-Log {
     param([string]$Message)
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    # Only simple ASCII [OK] etc to avoid Unicode
-    $cleanMessage = $Message -replace '[\x{2713}\x{2714}]','[OK]'
-    $text = "$timestamp $cleanMessage"
+    $text = "$timestamp $Message"
     Add-Content -Path $logFile -Value $text
     Write-Output $text
 }
@@ -121,12 +119,12 @@ if ($conflictingServices.Count -gt 0) {
 if ($Failures.Count -eq 0) {
     $finalMsg = "All readiness checks passed successfully."
     Write-Log $finalMsg
-    Write-Output $finalMsg # Ensures Azure VM extension details has a clear final line
+    Write-Output $finalMsg
     exit 0
 } else {
     $failuresMsg = "Readiness check failed with $($Failures.Count) issue(s): $($Failures -join '; ')"
     Write-Log $failuresMsg
-    Write-Output $failuresMsg # Ensures Azure VM extension details has a clear final line
+    Write-Output $failuresMsg
     exit 1
 }
 
