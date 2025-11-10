@@ -14,30 +14,33 @@ $logFile = "C:\Packages\Logs\Test-Readiness.log"
 
 function Write-Log {
     param([string]$Message)
-    $timestampedMessage = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
-    Add-Content -Path $logFile -Value $timestampedMessage
-    Write-Output $timestampedMessage
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    # Only simple ASCII [OK] etc to avoid Unicode
+    $cleanMessage = $Message -replace '[\x{2713}\x{2714}]','[OK]'
+    $text = "$timestamp $cleanMessage"
+    Add-Content -Path $logFile -Value $text
+    Write-Output $text
 }
 
 Set-Content -Path $logFile -Value "==== Test-Readiness Script Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===="
 
 $Failures = @()
 
-# Check OS Architecture
+# --- OS architecture check ---
 if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
-    $fail = "❌ Windows OS is not 64-bit."
+    $fail = "[FAIL] Windows OS is not 64-bit."
     $Failures += $fail
     Write-Log $fail
 } else {
-    Write-Log "✅ Windows OS is 64-bit architecture."
+    Write-Log "[OK] Windows OS is 64-bit architecture."
 }
 
-# Get OS SKU and EditionID from registry
+# --- OS Edition detection: AVD supported only ---
 try {
     $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
     $sku = $osInfo.OperatingSystemSKU
 } catch {
-    $fail = "❌ Failed to retrieve OS SKU: $_"
+    $fail = "[FAIL] Failed to retrieve OS SKU: $_"
     $Failures += $fail
     Write-Log $fail
     $sku = -1
@@ -46,7 +49,7 @@ try {
 try {
     $editionId = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "EditionID").EditionID
 } catch {
-    $fail = "❌ Failed to read EditionID from registry: $_"
+    $fail = "[FAIL] Failed to read EditionID from registry: $_"
     $Failures += $fail
     Write-Log $fail
     $editionId = ""
@@ -55,44 +58,31 @@ try {
 Write-Log "Detected EditionID: $editionId"
 Write-Log "Detected OS SKU: $sku"
 
-# Define supported EditionIDs (language agnostic)
+# Strict AVD-supported EditionIDs only
 $supportedEditionIDs = @(
     "Enterprise",
     "EnterpriseMultiSession",
     "ServerDatacenter",
     "ServerStandard",
-    "ServerSemiAnnual",
-    "ServerAzureEdition",
-    "EnterpriseG"
+    "ServerAzureEdition"
 )
 
-# Define supported SKUs as a fallback
-$supportedSKUs = @(4,7,8,10,48,50,98,101,118,121,125,155,156,175,178,188,191,192,328)
-
-# Determine support based on EditionID or SKU
-$supported = $false
-
+# Only pass if EditionID is in the AVD supported list
 if ($editionId -and ($supportedEditionIDs -contains $editionId)) {
-    $supported = $true
-} elseif ($sku -in $supportedSKUs) {
-    $supported = $true
-}
-
-if ($supported) {
-    Write-Log "✅ Windows OS edition/SKU is supported: EditionID='$editionId', SKU=$sku"
+    Write-Log "[OK] Windows OS edition is supported: EditionID='$editionId', SKU=$sku"
 } else {
-    $fail = "❌ Windows OS edition/SKU is NOT supported: EditionID='$editionId', SKU=$sku"
+    $fail = "[FAIL] Windows OS edition is NOT supported: EditionID='$editionId', SKU=$sku"
     $Failures += $fail
     Write-Log $fail
 }
 
-# Check for conflicting services
+# --- Conflicting services check ---
 Write-Log "Checking for conflicting 3rd-party agents for patterns: $($Publishers -join ', ') ..."
 
 try {
     $allServices = Get-Service
 } catch {
-    $fail = "❌ Failed to retrieve services: $_"
+    $fail = "[FAIL] Failed to retrieve services: $_"
     $Failures += $fail
     Write-Log $fail
     $allServices = @()
@@ -109,7 +99,7 @@ foreach ($svc in $allServices) {
     }
 }
 
-# Optionally exclude client app services if flags set
+# Optionally exclude certain Horizon/Workspace App services
 $clientAppServices = @("CtxAdpPolicy", "CtxPkm", "CWAUpdaterService", "client_service", "ftnlsv3hv", "ftscanmgrhv", "hznsprrdpwks", "omnKsmNotifier", "ws1etlm")
 
 if ($IgnoreClientApp) {
@@ -120,21 +110,24 @@ if ($IgnoreOmnissaHorizonClient) {
 }
 
 if ($conflictingServices.Count -gt 0) {
-    $fail = "❌ Conflicting 3rd-party agents found: $($conflictingServices | Sort-Object | Get-Unique -AsString -join ', ')."
+    $fail = "[FAIL] Conflicting 3rd-party agents found: $($conflictingServices | Sort-Object | Get-Unique -AsString -join ', ')."
     $Failures += $fail
     Write-Log $fail
 } else {
-    Write-Log "✅ No conflicting 3rd-party agents found."
+    Write-Log "[OK] No conflicting 3rd-party agents found."
 }
 
-# Output final summary
+# --- Output final summary to both log and stdout (for Azure portal) ---
 if ($Failures.Count -eq 0) {
-    Write-Log "All checks passed successfully."
+    $finalMsg = "All readiness checks passed successfully."
+    Write-Log $finalMsg
+    Write-Output $finalMsg # Ensures Azure VM extension details has a clear final line
+    exit 0
 } else {
-    Write-Log "Readiness check failed with $($Failures.Count) issue(s)."
-    foreach ($f in $Failures) {
-        Write-Log $f
-    }
+    $failuresMsg = "Readiness check failed with $($Failures.Count) issue(s): $($Failures -join '; ')"
+    Write-Log $failuresMsg
+    Write-Output $failuresMsg # Ensures Azure VM extension details has a clear final line
+    exit 1
 }
 
 Write-Log "==== Test-Readiness Script Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===="
